@@ -1,0 +1,86 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/Tide/00_Title.unity
+    guid: c1acdbe3272e119418c8e8580c31f211
+  - enabled: 1
+    path: Assets/Scenes/Tide/01_Cottage.unity
+    guid: 4aa1c53c0ad1a3f4a946287961868622
+  - enabled: 1
+    path: Assets/Scenes/Tide/02_Lighthouse.unity
+    guid: 7fbb1d64cf446354da22b83590d5d3a0
+  - enabled: 1
+    path: Assets/Scenes/Tide/03_Meadow.unity
+    guid: a905a75c471664b4ebc467b1cc0456a4
+  - enabled: 1
+    path: Assets/Scenes/Tide/04_Rift.unity
+    guid: 44cf35ba282ea404cb996cb2dc30c773
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial01_M0.unity
+    guid: 1e5d36db3ee0b5543a9c3d157d10c8e6
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial02_M01.unity
+    guid: da50be2f374b01e44a95e82145cebac0
+  - enabled: 1
+    path: Assets/Scenes/Tide/05_MemoryCottage.unity
+    guid: e852fc6219fb2a94caec67ff1ba235c5
+  - enabled: 1
+    path: Assets/Scenes/Tide/06_MemoryShore.unity
+    guid: d4ce44578ad64e74b994483f79a8ea10
+  - enabled: 1
+    path: Assets/Scenes/Tide/07_LanternDeck.unity
+    guid: a87206769e117bd4bb23c521c63a3628
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial03_M03.unity
+    guid: 145b345f11050fa448720d8ba5cb3c46
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial04_M04.unity
+    guid: dc5eab551daa95e449435be2d75c4f3b
+  - enabled: 1
+    path: Assets/Scenes/Tide/08_CottagePromise.unity
+    guid: dc46e317c4f3e8540b0b6a2032ad1b36
+  - enabled: 1
+    path: Assets/Scenes/Tide/09_CottageLetter.unity
+    guid: 79ce26a2595617c45accc367524b3e0f
+  - enabled: 1
+    path: Assets/Scenes/Tide/10_ShoreReunion.unity
+    guid: 24b5f7fb8aa81624680585e8db86bce2
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial05_M05.unity
+    guid: 010be8cf194be0a4cbca2b77fe16c506
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial06_M2.unity
+    guid: 243e53e0d20677f40b9b3a26fd3a2a2d
+  - enabled: 1
+    path: Assets/Scenes/Tide/11_ParkPromise.unity
+    guid: 7bb6fabb5ea100944a3da688ece19ad5
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial07_M3.unity
+    guid: 5d4b50009f3697748b3ebf76672c0ae1
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial08_M4.unity
+    guid: a5a96be2f31a38940bfbd7064882519d
+  - enabled: 1
+    path: Assets/Scenes/Tide/12_StreetOrigin.unity
+    guid: e565c376f2844a64681ff78fbcf475e1
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial09_M5.unity
+    guid: 78174bc17ee6f724280f7957373fa243
+  - enabled: 1
+    path: Assets/Scenes/Tide/Trial10_M6.unity
+    guid: 440d0d9580cd483448cced6d8075ac28
+  - enabled: 1
+    path: Assets/Scenes/Tide/13_DataStation.unity
+    guid: 0684d3d4e35eb3f48b688dedbfef322e
+  - enabled: 1
+    path: Assets/Scenes/Tide/14_CollapsingWorld.unity
+    guid: ccdcdb6aae9f2de49a0c0f983148a98a
+  - enabled: 1
+    path: Assets/Scenes/Tide/15_SunsetMeadow.unity
+    guid: 13550a901f45c33459ee3e2c3d5bb430
+  m_configObjects: {}
