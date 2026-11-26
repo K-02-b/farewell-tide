@@ -5,24 +5,25 @@ public static class TideLook {
  // In the cottage artwork the clear floor runs between the cabinet and the hearth.
  public const float CottageFloorY = -4.32f, CottageWalkLeft = -5.75f, CottageWalkRight = 4.60f;
  public const float WoodStepVolume = .78f;
+ public const float LighthouseActorHeight = 1.95f;
  public static void Story(TideStory s) {
   bool room=s.chapter==0;
   Background(s);
   s.left=room?CottageWalkLeft:-7.35f;s.right=room?CottageWalkRight:7.35f;
   s.ground=room?CottageFloorY+3.15f/2:-2.55f;
   var p=s.hero.transform.position;p.y=s.ground;s.hero.transform.position=p;
-  TideArt.Fit(s.hero,s.hero.sprite,room?3.15f:1.85f);
+  TideArt.Fit(s.hero,s.hero.sprite,room?3.15f:s.chapter==1?LighthouseActorHeight:1.85f);
   if(room&&s.objects!=null&&s.objects.Length==3){
    Place(s.objects[0],-6.65f,-.25f,2.35f);
    Place(s.objects[1],0,-1.90f,.80f);
    Place(s.objects[2],6.65f,.62f,1.15f);
   }
   if(s.chapter==1){
-   FitHusbandAtFeet(s.hero,s.hero.sprite,1.95f,s.hero.bounds.min.y);
-   s.wifeMarks=new[]{new Vector2(-5.96f,0),new Vector2(-2.7f,-2.75f),new Vector2(6.7f,-1.15f)};
+   // Front, walking and wife frames all use the same 320-pixel, centre-pivot canvas.
+   s.wifeMarks=new[]{new Vector2(-5.96f,s.ground),new Vector2(-2.7f,s.ground),new Vector2(6.7f,s.ground)};
    if(s.other){s.other.transform.position=s.wifeMarks[0];s.other.flipX=false;}
   }
-  if(s.other)TideArt.Fit(s.other,s.other.sprite,s.chapter==1?1.85f:1.9f);
+  if(s.other)TideArt.Fit(s.other,s.other.sprite,s.chapter==1?LighthouseActorHeight:1.9f);
  }
  public static void Background(TideStory s){
   TideArt.Fit(s.background,s.background.sprite,9);

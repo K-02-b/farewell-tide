@@ -29,7 +29,11 @@ public sealed class TideTitle : MonoBehaviour
     }
 #endif
 
-    public static void MarkEndingComplete() => endingComplete = true;
+    public static void MarkEndingComplete()
+    {
+        endingComplete = true;
+        TideCampaignProgress.FinishRun();
+    }
 
     void Start()
     {
@@ -88,6 +92,8 @@ public sealed class TideTitle : MonoBehaviour
         }
         TideTimeline.BeginRun();
         endingComplete = false;
-        SceneManager.LoadScene("01_Cottage");
+        string scene=TideCampaignProgress.ResumeScene;
+        TideTrial.ResumeSavedLanding(scene);
+        SceneManager.LoadScene(scene);
     }
 }

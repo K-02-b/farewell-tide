@@ -26,6 +26,7 @@ public sealed class TideEnding : MonoBehaviour
     bool walking, elderMoving, wifeFacesAway, manFacesAway, lifting;
     float cameraRise;
     int index, nextMemory, meadowLine, lastFrame = -1;
+    readonly TideDialogueSkip dialogueSkip = new TideDialogueSkip();
     const float ActorHeight = 1.85f;
     const float RoomWalkSpeed = 3.8f;
     const float MemoryWalkSpeed = 2f;
@@ -43,8 +44,10 @@ public sealed class TideEnding : MonoBehaviour
         hud.Border(dialogue,new Color(.73f,.6f,.38f,.65f));
         speaker = hud.Caption(hud.Box("名字",dialogue,Vector2.up,new Vector2(20,meadow?-5:-10),new Vector2(850,30),Color.clear),"",20,TextAnchor.MiddleLeft);
         speaker.color = new Color(.92f,.77f,.46f);
-        words = hud.Caption(hud.Box("台词",dialogue,Vector2.zero,new Vector2(20,meadow?6:12),new Vector2(860,meadow?60:102),Color.clear),"",22,TextAnchor.MiddleLeft);
+        words = hud.Caption(hud.Box("台词",dialogue,Vector2.zero,new Vector2(20,meadow?6:12),new Vector2(752,meadow?60:102),Color.clear),"",22,TextAnchor.MiddleLeft);
+        hud.DialogueContinue(dialogue);
         words.resizeTextForBestFit=true; words.resizeTextMinSize=18; words.resizeTextMaxSize=22;
+        words.verticalOverflow=VerticalWrapMode.Truncate;
         hud.Click(dialogue,Advance);
         prompt=hud.Panel("交互提示",.5f,0,0,34,210,38,TideHUD.ink);
         promptText=hud.Caption(prompt,"",18,TextAnchor.MiddleCenter);
@@ -100,7 +103,7 @@ public sealed class TideEnding : MonoBehaviour
         if(phase!=Phase.Dialogue || lastFrame==Time.frameCount || TidePause.BlocksInput)return;
         lastFrame=Time.frameCount;phase=Phase.Acting;dialogue.gameObject.SetActive(false);
         if(location==Location.Meadow){StartCoroutine(MeadowBeat());return;}
-        if(index==0){choice.gameObject.SetActive(true);phase=Phase.Choice;return;}
+        if(index==0){dialogueSkip.Reset();choice.gameObject.SetActive(true);phase=Phase.Choice;return;}
         index++;
         if(index>=conversation.Length){hero.flipX=true;phase=Phase.Exit;return;}
         StartCoroutine(StationBeat());
@@ -142,7 +145,7 @@ public sealed class TideEnding : MonoBehaviour
 
     void Update()
     {
-        if(TidePause.BlocksInput)return;
+        if(TidePause.BlocksInput){dialogueSkip.Reset();return;}
         if(lifting) {
             // Reserve a little more sky for each page, even if the player lingers.
             int pagesRead=meadowLine-beforeSunsetTurn.Length;
@@ -158,7 +161,8 @@ public sealed class TideEnding : MonoBehaviour
             dialogue.anchoredPosition=new Vector2(0,12*scale);
         }
         bool interact=Input.GetKeyDown(KeyCode.E)||Input.GetKeyDown(KeyCode.Return);
-        if(phase==Phase.Dialogue && (interact||Input.GetKeyDown(KeyCode.Space)))Advance();
+        bool repeat=dialogueSkip.ShouldRepeat(phase==Phase.Dialogue, phase==Phase.Acting);
+        if(phase==Phase.Dialogue && (interact||Input.GetKeyDown(KeyCode.Space)||repeat))Advance();
         else if(phase==Phase.Exit || phase==Phase.Crossing || phase==Phase.BackupTerminal)Explore(interact);
         if(!manFacesAway)
         {

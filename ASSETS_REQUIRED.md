@@ -9,3 +9,5 @@ Recover these binary files and matching .meta files from the team's corrected Un
 - Any original map-source images used to modify the tilemaps under `Assets/Tide/MapSource/`.
 
 Keep original paths and Unity GUIDs when adding the team's approved asset copies. The repository is suitable for inspecting the game source and serialized scene data. Play the published Windows ZIP for the complete presentation.
+
+The revised physics outlines for dungeon.png and temple.png are supplied in Assets/Tide/MapSource/Scenes/New Folder/. When restoring the team art, retain those two .png.meta files from this revision.

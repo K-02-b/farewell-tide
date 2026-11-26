@@ -49,6 +49,11 @@ public class TideHUD {
  public void Border(RectTransform r,Color color){
   var line=Box("上边线",r,new Vector2(.5f,1),new Vector2(0,-1),new Vector2(r.sizeDelta.x-24,1),color);line.GetComponent<Image>().sprite=null;
  }
+ public RectTransform DialogueContinue(RectTransform dialogue){
+  var hint=Box("继续提示",dialogue,Vector2.right,new Vector2(-12,5),new Vector2(116,26),Color.clear);
+  Caption(hint,"[E] 继续",18,TextAnchor.MiddleRight).color=new Color(.92f,.83f,.66f);
+  return hint;
+ }
  public void Click(RectTransform r,Action action){r.GetComponent<Image>().raycastTarget=true;Button b=narrative?(Button)r.gameObject.AddComponent<TideNarrativeButton>():r.gameObject.AddComponent<Button>();b.onClick.AddListener(()=>action());}
  public RectTransform Panel(string name,float ax,float ay,float x,float y,float w,float h,Color c,Sprite s=null)=>Box(name,root,new Vector2(ax,ay),new Vector2(x,y),new Vector2(w,h),c,s);
 }

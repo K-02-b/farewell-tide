@@ -25,10 +25,11 @@ public sealed class TideStreet : MonoBehaviour
     public Line[] lines;
     Camera view;
     TideHUD hud;
-    RectTransform dialogue, yes;
+    RectTransform dialogue, yes, continueHint;
     Text nameLabel, words;
     Sprite[] wifeIdle, manIdle, manWalk, elderIdle, elderWalk;
     int index, lastInput = -1;
+    readonly TideDialogueSkip dialogueSkip = new TideDialogueSkip();
     float zoom;
     bool busy, elderWalking, manWalking, finished;
 
@@ -51,7 +52,8 @@ public sealed class TideStreet : MonoBehaviour
             new Vector2(840,30),Color.clear),"",20,TextAnchor.MiddleLeft);
         nameLabel.color = new Color(.92f,.77f,.46f);
         words = hud.Caption(hud.Box("台词",dialogue,Vector2.zero,new Vector2(20,9),
-            new Vector2(860,65),Color.clear),"",24,TextAnchor.MiddleLeft);
+            new Vector2(752,65),Color.clear),"",24,TextAnchor.MiddleLeft);
+        continueHint = hud.DialogueContinue(dialogue);
         hud.Click(dialogue, ContinueDialogue);
         yes = hud.Box("确认权限",dialogue,new Vector2(1,.5f),new Vector2(-28,-10),
             new Vector2(82,40),TideHUD.ink);
@@ -64,9 +66,11 @@ public sealed class TideStreet : MonoBehaviour
     {
         busy = false;
         var line = lines[index];
+        if (line.cue == Cue.Permission) dialogueSkip.Reset();
         nameLabel.text = line.speaker;
         words.text = line.text;
         yes.gameObject.SetActive(line.cue == Cue.Permission);
+        continueHint.gameObject.SetActive(line.cue != Cue.Permission);
         dialogue.gameObject.SetActive(true);
     }
 
@@ -133,13 +137,15 @@ public sealed class TideStreet : MonoBehaviour
 
     void Update()
     {
-        if(TidePause.BlocksInput)return;
+        if(TidePause.BlocksInput){dialogueSkip.Reset();return;}
         Animate(wife,wifeIdle,6);
         var husbandFrames=manWalking?manWalk:manIdle;
         TideLook.PoseHusband(husband,husbandFrames[(int)(Time.time*(manWalking?9:6))%husbandFrames.Length],wife,2.12f,!manWalking);
         if (elder.gameObject.activeSelf) Animate(elder,elderWalking ? elderWalk : elderIdle, elderWalking ? 10 : 6);
+        bool dialogueVisible = !finished && !busy && lines[index].cue != Cue.Permission;
+        bool repeat = dialogueSkip.ShouldRepeat(dialogueVisible, busy && !finished);
         if (!busy && !finished && (Input.GetKeyDown(KeyCode.E)||Input.GetKeyDown(KeyCode.Return))) Advance();
-        else if (Input.GetKeyDown(KeyCode.Space)) ContinueDialogue();
+        else if (Input.GetKeyDown(KeyCode.Space) || repeat) ContinueDialogue();
     }
 
     static void Animate(SpriteRenderer actor, Sprite[] frames, int rate)

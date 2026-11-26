@@ -6,7 +6,7 @@ A story-driven puzzle platformer for GitHub Game Off 2026. Press **Shift** to sl
 
 Download the Windows x64 ZIP from the game's itch.io page. Extract the entire archive and launch `再见潮汐.exe`. The game is in Simplified Chinese.
 
-- A/D or arrow keys: move. Space: jump or advance dialogue.
+- A/D or arrow keys: move. Space: jump or advance dialogue. Hold Space for two seconds during dialogue to fast-forward.
 - Shift: enter or leave platform placement. Drag a platform with the mouse after collecting a yellow orb.
 - Red platforms provide footing. Green platforms boost jumps. On a purple platform, press V to dash.
 - E or Enter: interact. Walk up to the backup terminal before interacting.
@@ -22,4 +22,8 @@ AI tools assisted with code implementation and debugging, game-art iteration and
 
 ## Game Off build — 2026-11-26
 
-Falls, spikes, and other lethal hazards return the player to the last safe footing. The fourth trial's guide now skips the old third platform. R restarts the current trial from the beginning.
+Falls, spikes, and other lethal hazards return the player to the center of the last fixed platform checkpoint, restoring placed platforms, orbs and energy. The fourth trial's guide now skips the old third platform. R restarts the current trial from the beginning.
+
+The title screen resumes the last story scene or trial checkpoint. The Esc stage menu includes six story acts and ten trials, unlocked as they are reached. Selecting an unlocked entry replays it from its start.
+
+After collecting a journal, use Tab to browse the collection. Space turns the page and Esc closes the journal. Checkpoints activate when the player stands near the center of a fixed platform.

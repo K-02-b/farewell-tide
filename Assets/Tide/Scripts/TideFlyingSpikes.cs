@@ -30,11 +30,13 @@ public sealed class TideFlyingSpikes
         public bool warnsOnLanding;
         public bool fired;
     }
-    public struct RetryState
+    public int StripCount => strips.Count;
+
+    [System.Serializable] public struct RetryState
     {
-        internal float lift, speed, warningLeft;
-        internal bool fired, visible;
-        internal Vector3 visualOffset;
+        public float lift, speed, warningLeft;
+        public bool fired, visible;
+        public Vector3 visualOffset;
     }
 
     public TideFlyingSpikes(int level, IEnumerable<Collider2D> colliders, Transform parent, float jumpSpeed)

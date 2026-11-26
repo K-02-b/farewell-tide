@@ -28,6 +28,7 @@ public sealed class TideMemory : MonoBehaviour
 
     Phase phase;
     int line, lastDialogueInput=-1;
+    readonly TideDialogueSkip dialogueSkip = new TideDialogueSkip();
     float arrivalDelay, nextStep;
     Sprite[] idle, walk, side, front;
     TideHUD ui;
@@ -73,13 +74,18 @@ public sealed class TideMemory : MonoBehaviour
         ui = new TideHUD(true);
         dialogue = ui.Panel("对话", .5f, 1, 0, -24, 900, 156, TideHUD.ink);
         ui.Border(dialogue, new Color(.73f, .60f, .38f, .65f));
+        ui.DialogueContinue(dialogue);
         portrait = ui.Box("头像", dialogue, new Vector2(0,.5f), new Vector2(30,0),
             new Vector2(80,88), Color.white, wifePortrait).GetComponent<Image>();
         speaker = ui.Caption(ui.Box("名字", dialogue, Vector2.up, new Vector2(134,-16),
             new Vector2(630,28), Color.clear), "", 19, TextAnchor.MiddleLeft);
         speaker.color = new Color(.92f,.77f,.46f);
-        words = ui.Caption(ui.Box("台词", dialogue, Vector2.zero, new Vector2(134,32),
-            new Vector2(728,78), Color.clear), "", 23, TextAnchor.MiddleLeft);
+        words = ui.Caption(ui.Box("台词", dialogue, Vector2.zero, new Vector2(134,36),
+            new Vector2(728,76), Color.clear), "", 23, TextAnchor.MiddleLeft);
+        words.resizeTextForBestFit = true;
+        words.resizeTextMinSize = 17;
+        words.resizeTextMaxSize = 23;
+        words.verticalOverflow = VerticalWrapMode.Truncate;
         ui.Click(dialogue, Advance);
         prompt = ui.Panel("交互提示", .5f, .5f, 0, 0, setting == Setting.Shore ? 214 : 132, 34, TideHUD.ink);
         string action = setting == Setting.Letter ? "[E] 读信" : setting == Setting.Shore ? "[E] 前往灯塔顶端" : setting == Setting.Cottage ? "[E] 出门" : "[E] 进入";
@@ -233,10 +239,13 @@ public sealed class TideMemory : MonoBehaviour
 
     void Update()
     {
-        if(TidePause.BlocksInput)return;
+        if(TidePause.BlocksInput){dialogueSkip.Reset();return;}
         TideArt.CameraFrame(sceneCamera, 16, 9);
+        bool betweenLines = phase == Phase.Arrival || phase == Phase.WalkingAway || phase == Phase.Crying;
+        bool repeat = dialogueSkip.ShouldRepeat(phase == Phase.Dialogue, betweenLines);
         bool interact = Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Return)
-            || ((phase == Phase.Dialogue || phase == Phase.Reading || phase == Phase.Flower) && Input.GetKeyDown(KeyCode.Space));
+            || ((phase == Phase.Dialogue || phase == Phase.Reading || phase == Phase.Flower) && Input.GetKeyDown(KeyCode.Space))
+            || repeat;
         if (phase == Phase.WarningGate)
         {
             var tip = gate.bounds.center + Vector3.up * (gate.bounds.extents.y + .38f);

@@ -10,6 +10,9 @@ public class TideTrial : MonoBehaviour {
  public Vector2 fragmentPosition;
  public TextAsset fragmentDocument;
  TideTrialFragment fragment;
+ RectTransform journalButton;
+ TextAsset pendingJournal;
+ bool journalRequested;
  public bool spikeHazards;
  public SpriteRenderer startingPad;
  [System.Serializable] public struct PlatformSpot {
@@ -52,12 +55,19 @@ public class TideTrial : MonoBehaviour {
  bool fastFallHeld,spawnFacingRight;
  double respawnAt;
  LandingCheckpoint checkpoint;
+ struct FixedLanding { public Vector2 center; public float halfWidth,surfaceY; }
+ readonly List<FixedLanding> fixedLandings=new List<FixedLanding>();
+ int touchedLanding=-1;
  Vector2 pos;const float Half=.29f,Body=1.24f;
  readonly List<Pad> pads=new List<Pad>();struct Pad {public Vector2 center;public float halfWidth;public int type;public SpriteRenderer view;}
- sealed class LandingCheckpoint{
+ [System.Serializable] struct PlacedPlatformState {public Vector2 center;public float width;public int type;}
+ bool[] initialOrbs;
+ [System.Serializable] sealed class LandingCheckpoint{
+  public int version;
+  public bool movedExit;
   public Vector2 feet;
   public bool facingRight,hiddenBrickShown;
-  public Pad[] pads;
+  public PlacedPlatformState[] placedPlatforms;
   public bool[] visibleOrbs;
   public int charge;
   public float cooldown,padTime,patrolDistance;
@@ -69,7 +79,20 @@ public class TideTrial : MonoBehaviour {
   public Vector2 decoyPad;
   public Vector3 decoyPosition,decoyScale;
   public Color decoyColor;
-  public Sprite decoySprite;
+ }
+ const string LandingKeyPrefix="Tide.Landing.v2.",OldLandingKeyPrefix="Tide.Landing.v1.";
+ static string resumeLandingScene;
+ [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+ static void ResetResumeRequest(){resumeLandingScene=null;}
+ public static void ResumeSavedLanding(string sceneName){resumeLandingScene=sceneName;}
+ public static void ClearSavedLanding(string sceneName){
+  if(resumeLandingScene==sceneName)resumeLandingScene=null;
+  var key=LandingKeyPrefix+sceneName;
+  var oldKey=OldLandingKeyPrefix+sceneName;
+  if(!PlayerPrefs.HasKey(key)&&!PlayerPrefs.HasKey(oldKey))return;
+  PlayerPrefs.DeleteKey(key);
+  PlayerPrefs.DeleteKey(oldKey);
+  PlayerPrefs.Save();
  }
  readonly HashSet<Collider2D> terrain=new HashSet<Collider2D>();readonly Collider2D[] hits=new Collider2D[64];
  readonly RaycastHit2D[] surfaceHits=new RaycastHit2D[16];
@@ -98,6 +121,7 @@ public class TideTrial : MonoBehaviour {
   }
  }
  Physics2D.SyncTransforms();
+ FindFixedLandings();
  PrepareHiddenBrick();
  flyingSpikes=new TideFlyingSpikes(number,spikes,transform,JumpSpeed);
  patrols=TidePatrols.Create(number,transform);
@@ -107,7 +131,7 @@ public class TideTrial : MonoBehaviour {
  TideLook.Shadow(hero.transform,.25f,-.65f);
  footShadow=hero.GetComponentInChildren<MeshRenderer>();
  ui=new TideHUD();
- if(fragmentDocument) fragment=new TideTrialFragment(ui,transform,fragmentPosition,fragmentDocument);
+ if(fragmentDocument) fragment=new TideTrialFragment(transform,fragmentPosition,fragmentDocument);
  var bar=ui.Panel("关卡能量",.5f,1,0,-16,100,18,Color.clear);
  ui.Box("能量球",bar,new Vector2(0,.5f),Vector2.zero,new Vector2(16,16),Color.white,TideArt.Pic("Art/Orb"));
  var track=ui.Box("能量槽",bar,new Vector2(0,.5f),new Vector2(20,0),new Vector2(76,9),Color.white);
@@ -116,6 +140,7 @@ public class TideTrial : MonoBehaviour {
  var fillImage=energyFill.GetComponent<Image>();fillImage.sprite=null;fillImage.type=Image.Type.Simple;fillImage.color=new Color(1,.78f,.27f);
  shiftView=new TideShiftView(ui,w,h,bar,platformSprites);
  if(MarkedRoute)feedback=new TideTrialFeedback(hero,transform);
+ initialOrbs=CaptureOrbs();
  RestoreStartingPad();
  if(number==1&&placementHints!=null)foreach(var spot in placementHints){
   var view=Make("建议落点",spot.center,spot.kind,spot.Width);view.color=new Color(1,1,1,.36f);view.enabled=false;hintViews.Add(view);
@@ -129,10 +154,105 @@ public class TideTrial : MonoBehaviour {
   hintButton.GetComponent<Button>().navigation=new Navigation{mode=Navigation.Mode.None};
   hintButton.gameObject.SetActive(TideGuideBook.Unlocked(number));
  }
- if(number==1)ShowControls();
+ journalButton=ui.Panel("查看日志",1,1,-16,-57,192,39,TideHUD.ink);
+ ui.Caption(journalButton,"TAB 查看日志",18,TextAnchor.MiddleCenter);
+ ui.Click(journalButton,TidePause.RequestJournal);
+ journalButton.GetComponent<Button>().navigation=new Navigation{mode=Navigation.Mode.None};
+ journalButton.gameObject.SetActive(TideJournal.HasAny);
+ bool resumed=TryResumeSavedLanding();
+ if(number==1&&!resumed)ShowControls();
+ }
+
+ bool TryResumeSavedLanding(){
+  string sceneName=gameObject.scene.name;
+  bool requested=resumeLandingScene==sceneName;
+  resumeLandingScene=null;
+  string key=LandingKeyPrefix+sceneName;
+  if(!requested){ClearSavedLanding(sceneName);return false;}
+  string oldKey=OldLandingKeyPrefix+sceneName;
+  bool legacy=!PlayerPrefs.HasKey(key);
+  if(legacy&&!PlayerPrefs.HasKey(oldKey))return false;
+  try{
+   var saved=JsonUtility.FromJson<LandingCheckpoint>(PlayerPrefs.GetString(legacy?oldKey:key));
+   if(saved!=null&&saved.version==(legacy?1:2)&&saved.visibleOrbs!=null&&saved.visibleOrbs.Length==orbs.Length&&
+      saved.placedPlatforms!=null&&saved.flyingSpikes!=null&&saved.flyingSpikes.Length==flyingSpikes.StripCount&&
+      saved.feet.x>=0&&saved.feet.x<=w&&saved.feet.y>=0&&saved.feet.y<h&&
+      System.Array.TrueForAll(saved.placedPlatforms,p=>p.type>=0&&p.type<platformSprites.Length&&p.width>0)&&
+      ResolveSavedCenter(saved,legacy)){
+    checkpoint=saved;
+    if(legacy){
+     saved.version=2;
+     PlayerPrefs.SetString(key,JsonUtility.ToJson(saved));
+     PlayerPrefs.DeleteKey(oldKey);
+     PlayerPrefs.Save();
+    }
+    if(number==10&&saved.movedExit){exitRelocated=true;exit.transform.position=RelocatedExitPosition;}
+    RestoreLanding();
+    return true;
+   }
+  }catch(System.ArgumentException e){Debug.LogWarning("无法读取关卡落脚点："+e.Message);}
+  ClearSavedLanding(sceneName);
+  return false;
  }
 
  void OnDestroy(){flyingSpikes?.Dispose();}
+ // Inspect the original tile collision once, before hidden bricks or movable platforms are added.
+ // Runs break at slopes, hazards and low ceilings. Their midpoints stay fixed for the whole room.
+ void FindFixedLandings(){
+  const int samplesPerTile=4;
+  for(int y=1;y<h;y++){
+   int start=-1;float height=0;
+   for(int i=0;i<=w*samplesPerTile;i++){
+    float x=(i+.5f)/samplesPerTile;
+    bool clear=TrySolidHit(new Vector2(x,y+.18f),Vector2.down,.32f,out var hit)&&
+      hit.collider is TilemapCollider2D&&hit.normal.y>.99f&&
+      !TerrainHit(hit.point+Vector2.up*.035f,.025f,Body-.035f,out _);
+    if(start>=0&&(!clear||Mathf.Abs(hit.point.y-height)>.025f)){
+     float width=(i-start)/(float)samplesPerTile;
+     if(width>=Half*2&&TryStandingCenter((i+start)*.5f/samplesPerTile,height,out var center))
+      fixedLandings.Add(new FixedLanding{center=center,halfWidth=width*.5f,surfaceY=height});
+     start=-1;
+    }
+    if(clear&&start<0){start=i;height=hit.point.y;}
+   }
+  }
+ }
+ bool TryStandingCenter(float x,float surfaceY,out Vector2 center){
+  // At tile seams the ray is on the artwork while OverlapBox still sees its physics contact skin.
+  // Keep the original centre and choose the first free height within the normal grounded tolerance.
+  center=new Vector2(x,surfaceY+.002f);
+  for(int step=0;step<13;step++){
+   center.y=surfaceY+.002f+step*.004f;
+   if(!Block(center,out _))return true;
+  }
+  return false;
+ }
+ int FixedLandingAt(Vector2 feet,bool fullSurface=false){
+  for(int i=0;i<fixedLandings.Count;i++){
+   var point=fixedLandings[i];
+   float radius=fullSurface?point.halfWidth:Mathf.Min(.75f,point.halfWidth-.075f);
+   if(Mathf.Abs(feet.y-point.surfaceY)<=.065f&&Mathf.Abs(feet.x-point.center.x)<=radius){
+    if(TrySolidHit(feet+Vector2.up*.10f,Vector2.down,.17f,out var hit)&&hit.normal.y>.99f&&
+       Mathf.Abs(hit.point.y-point.surfaceY)<.025f)return i;
+   }
+  }
+  return -1;
+ }
+ bool ResolveSavedCenter(LandingCheckpoint saved,bool legacy){
+  int i=FixedLandingAt(saved.feet,legacy);
+  if(i<0)return false;
+  Vector2 center=fixedLandings[i].center;
+  if(!legacy&&Vector2.Distance(saved.feet,center)>.01f)return false;
+  if(saved.startingPadEnabled&&startingPad&&OnPadTop(saved.feet,startingPad.transform.position,startingPad.bounds.extents.x))return false;
+  foreach(var p in saved.placedPlatforms){
+   if(OnPadTop(saved.feet,p.center,p.width*.5f))return false;
+   if(Mathf.Abs(center.x-p.center.x)<p.width*.5f+Half&&center.y<p.center.y+.169f&&center.y+Body>p.center.y-.169f)return false;
+  }
+  saved.feet=center;return true;
+ }
+ static bool OnPadTop(Vector2 feet,Vector2 center,float halfWidth){
+  return Mathf.Abs(feet.x-center.x)<halfWidth+Half&&Mathf.Abs(feet.y-center.y-.169f)<.065f;
+ }
  void PrepareHiddenBrick(){
   if(number!=1 && number!=9)return;
   // Intercept the ordinary jump toward the stone balcony in room 1 or the upper exit steps in room 9.
@@ -269,7 +389,21 @@ public class TideTrial : MonoBehaviour {
  }
  const int Spike=-2;
  bool Block(Vector2 p,out int k){k=-1;
- if(TerrainHit(p,Half,Body,out bool spike)){if(spike)k=Spike;return true;}
+ if(TerrainHit(p,Half,Body,out bool spike)){
+  if(spike){k=Spike;return true;}
+  // On a ramp the soles meet the surface at their centre. Keep the shoulders and head full-width.
+  const float ankleHeight=Half+.045f;
+  if(TerrainHit(p+Vector2.up*ankleHeight,Half,Body-ankleHeight,out _))return true;
+  if(TryRampFloor(p,out float floorY)){
+   if(p.y<floorY-.001f)return true;
+  }else{
+   // OverlapBox also reports touching faces. Let a foot at the exact ramp/flat seam move sideways.
+   const float soleSkin=.025f;
+   if(TerrainHit(p+Vector2.up*soleSkin,Half,Body-soleSkin,out _)||
+      !TrySolidHit(p+Vector2.up*soleSkin,Vector2.down,soleSkin+.002f,out var flat)||
+      flat.normal.y<.99f||p.y<flat.point.y-.001f)return true;
+  }
+ }
  if(p.x<Half||p.x>w-Half||p.y+Body>h)return true;
  foreach(var pad in pads)if(Mathf.Abs(p.x-pad.center.x)<pad.halfWidth+Half-.001f&&p.y<pad.center.y+.169f&&p.y+Body>pad.center.y-.169f){k=pad.type;return true;}return false;}
  // Test only the strip immediately below the soles. A wall beside the torso is not a floor.
@@ -277,8 +411,8 @@ public class TideTrial : MonoBehaviour {
   kind=-1;
   // Leave a narrow margin outside the soles so a tangent wall cannot support a fall.
   if(TerrainHit(pos-Vector2.up*depth,Half-.025f,depth,out bool spike)){
-   if(spike)kind=Spike;
-   return true;
+   if(spike){kind=Spike;return true;}
+   if(!TryRampFloor(pos,out float floorY)||Mathf.Abs(pos.y-floorY)<=depth+.001f)return true;
   }
   foreach(var pad in pads){
    float gap=pos.y-(pad.center.y+.169f);
@@ -290,6 +424,7 @@ public class TideTrial : MonoBehaviour {
  }
  bool FindSoleSlope(float depth,out Vector2 normal){
   normal=Vector2.zero;
+  if(TryRampFloor(pos,out _))return false;
   // The hero slides when only the outer edge of the collision box touches a steep slope.
   if(TerrainHit(pos-Vector2.up*depth,.12f,depth,out _))return false;
   for(int side=-1;side<=1;side+=2){
@@ -307,16 +442,47 @@ public class TideTrial : MonoBehaviour {
   return false;
  }
  bool SolidSurface(Vector2 origin,Vector2 direction,float distance,out Vector2 normal){
-  normal=Vector2.zero;
+  bool found=TrySolidHit(origin,direction,distance,out var surface);
+  normal=surface.normal;
+  return found;
+ }
+ bool TrySolidHit(Vector2 origin,Vector2 direction,float distance,out RaycastHit2D surface){
+  surface=default;
   int count=Physics2D.RaycastNonAlloc(origin,direction,surfaceHits,distance);
   float nearest=float.PositiveInfinity;
   for(int i=0;i<count;i++){
    var hit=surfaceHits[i];
    if(hit.distance<=0||hit.distance>=nearest||!terrain.Contains(hit.collider)||spikes.Contains(hit.collider))continue;
    nearest=hit.distance;
-   normal=hit.normal;
+   surface=hit;
   }
   return nearest<float.PositiveInfinity;
+ }
+ // Probe the actual tile contour, including the flat ground at either end of the ramp.
+ bool TryRampFloor(Vector2 feet,out float floorY){
+  const float reach=Half+.12f;
+  floorY=0;
+  Vector2 from=feet+Vector2.up*reach;
+  if(!TrySolidHit(from,Vector2.down,reach*2,out var middle)||middle.normal.y<.45f)return false;
+  floorY=middle.point.y;
+  if(IsWalkableRamp(middle))return true;
+  if(middle.normal.y<.9f)return false;
+  for(int side=-1;side<=1;side+=2){
+   if(TrySolidHit(from+Vector2.right*(side*(Half+.025f)),Vector2.down,reach*2,out var toe)&&IsWalkableRamp(toe))return true;
+  }
+  return false;
+ }
+ bool IsWalkableRamp(RaycastHit2D surface){
+  if(surface.normal.y<.45f||surface.normal.y>.90f||Mathf.Abs(surface.normal.x)<.35f)return false;
+  var map=surface.collider.GetComponent<Tilemap>();
+  if(!map)return false;
+  // A dangling bevel under a vertical wall is not a landing. Allow connected stairs to meet walls.
+  var cell=map.WorldToCell(surface.point-surface.normal*.015f);
+  Vector2 center=map.GetCellCenterWorld(cell);
+  float uphill=-Mathf.Sign(surface.normal.x);
+  Vector2 aboveLip=center+new Vector2(uphill*.55f,.79f);
+  Vector2 belowToe=center-new Vector2(uphill*.55f,.60f);
+  return !TerrainHit(aboveLip,.018f,.04f,out _)||TerrainHit(belowToe,.018f,.04f,out _);
  }
  bool SlideOffSoleSlope(Vector2 next,float depth){
   if(!FindSoleSlope(depth,out Vector2 slope))return false;
@@ -337,15 +503,35 @@ public class TideTrial : MonoBehaviour {
   startingPad.enabled=true;
   pads.Add(new Pad{center=startingPad.transform.position,halfWidth=startingPad.bounds.extents.x,type=0,view=startingPad});
  }
+ void ClearPlatforms(){
+  foreach(var pad in pads){
+   if(!pad.view||pad.view==startingPad)continue;
+   pad.view.enabled=false;
+   Destroy(pad.view.gameObject);
+  }
+  pads.Clear();
+ }
+ void AddPlacedPlatform(Vector2 center,int kind,float width){
+  var view=Make("已放置平台",center,kind,width);
+  pads.Add(new Pad{center=center,halfWidth=width*.5f,type=kind,view=view});
+ }
+ bool[] CaptureOrbs(){
+  var visible=new bool[orbs.Length];
+  for(int i=0;i<orbs.Length;i++)visible[i]=orbs[i].gameObject.activeSelf;
+  return visible;
+ }
+ void RestoreOrbs(bool[] visible){
+  for(int i=0;i<orbs.Length;i++)orbs[i].gameObject.SetActive(visible[i]);
+ }
  void ResetRoom(){
+  ClearSavedLanding(gameObject.scene.name);
   if(hiddenBrickShown){SetHiddenBrick(null);hiddenBrickShown=false;}
   flyingSpikes.Reset();
   patrols?.Reset();
   if(decoy){decoy.enabled=false;decoyArmed=decoyTriggered=false;decoyAge=0;}
-  foreach(var pad in pads)if(pad.view!=startingPad){pad.view.enabled=false;Destroy(pad.view.gameObject);}
-  pads.Clear();
+  ClearPlatforms();
   RestoreStartingPad();
-  foreach(var orb in orbs)orb.gameObject.SetActive(true);
+  RestoreOrbs(initialOrbs);
   charge=0;cooldown=0;checkpoint=null;
   ResetPlayer(spawn,spawnFacingRight);
  }
@@ -358,6 +544,7 @@ public class TideTrial : MonoBehaviour {
   landingAge=landingDuration=0;respawnAt=0;
   takeoffAge=float.PositiveInfinity;
   support=-1;pos=feet;
+  touchedLanding=checkpoint==null?-1:FixedLandingAt(feet);
   audioOut.Stop();
   hero.flipX=facingRight;hero.color=Color.white;
   energyFill.sizeDelta=new Vector2(72*charge,5);
@@ -368,29 +555,40 @@ public class TideTrial : MonoBehaviour {
  // Capture after a landing and after pickups, so the orb, energy and pad state travel together.
  void RecordLanding(){
   const float reactionTime=.30f;
-  if(pos.y<0||Block(pos,out _)||!FeetSupported(.06f,out int floor)||floor==Spike)return;
-  if(startingPad&&startingPad.enabled&&startingPadLifetime>0&&padTime>=0&&startingPadLifetime-padTime<reactionTime){
-   var bounds=startingPad.bounds;
-   if(Mathf.Abs(pos.x-bounds.center.x)<bounds.extents.x+Half&&Mathf.Abs(pos.y-bounds.max.y)<.065f)return;
+  if(airborne){
+   // A sub-step can settle the last millimetres after respawn without leaving the platform.
+   if(touchedLanding>=0&&(vy>0||FixedLandingAt(pos)!=touchedLanding))touchedLanding=-1;
+   return;
   }
-  if(flyingSpikes.ThreatensLanding(pos,Half,Body,reactionTime)||
-     (patrols!=null&&patrols.ThreatensLanding(pos,Half,Body,reactionTime)))return;
+  int i=FixedLandingAt(pos);
+  if(i<0){touchedLanding=-1;return;}
+  if(i==touchedLanding)return;
+  foreach(var pad in pads)
+   if(OnPadTop(pos,pad.center,pad.halfWidth))return;
+  var center=fixedLandings[i].center;
+  if(Block(center,out _)||flyingSpikes.ThreatensLanding(center,Half,Body,reactionTime)||
+     (patrols!=null&&patrols.ThreatensLanding(center,Half,Body,reactionTime)))return;
   if(decoy&&decoy.enabled&&decoyTriggered){
    var area=decoy.bounds;
    area.Expand(new Vector3(2.6f,1.5f,0));
-   if(area.Intersects(new Bounds(pos+Vector2.up*(Body*.5f),new Vector3(Half*2,Body,0))))return;
+   if(area.Intersects(new Bounds(center+Vector2.up*(Body*.5f),new Vector3(Half*2,Body,0))))return;
   }
+  var placed=new List<PlacedPlatformState>(pads.Count);
+  foreach(var pad in pads)if(pad.view!=startingPad)
+   placed.Add(new PlacedPlatformState{center=pad.center,type=pad.type,width=pad.halfWidth*2});
   checkpoint=new LandingCheckpoint{
-   feet=pos,facingRight=hero.flipX,hiddenBrickShown=hiddenBrickShown,pads=pads.ToArray(),
-   visibleOrbs=new bool[orbs.Length],charge=charge,cooldown=cooldown,padTime=padTime,
+   version=2,movedExit=exitRelocated,
+   feet=center,facingRight=hero.flipX,hiddenBrickShown=hiddenBrickShown,placedPlatforms=placed.ToArray(),
+   visibleOrbs=CaptureOrbs(),charge=charge,cooldown=cooldown,padTime=padTime,
    startingPadEnabled=startingPad&&startingPad.enabled,startingPadColor=startingPad?startingPad.color:Color.white,
    flyingSpikes=flyingSpikes.CaptureRetryState(),patrolDistance=patrols?.Travelled??0,
    decoyEnabled=decoy&&decoy.enabled,decoyArmed=decoyArmed,decoyTriggered=decoyTriggered,
    decoyAge=decoyAge,decoyPad=decoyPad,decoyPosition=decoy?decoy.transform.position:Vector3.zero,
-   decoyScale=decoy?decoy.transform.localScale:Vector3.one,decoyColor=decoy?decoy.color:Color.white,
-   decoySprite=decoy?decoy.sprite:null
+   decoyScale=decoy?decoy.transform.localScale:Vector3.one,decoyColor=decoy?decoy.color:Color.white
   };
-  for(int i=0;i<orbs.Length;i++)checkpoint.visibleOrbs[i]=orbs[i].gameObject.activeSelf;
+  touchedLanding=i;
+  PlayerPrefs.SetString(LandingKeyPrefix+gameObject.scene.name,JsonUtility.ToJson(checkpoint));
+  PlayerPrefs.Save();
  }
  void RestoreLanding(){
   var saved=checkpoint;
@@ -399,32 +597,33 @@ public class TideTrial : MonoBehaviour {
    hiddenBrickShown=saved.hiddenBrickShown;
    SetHiddenBrick(hiddenBrickShown?hiddenBrickTile:null);
   }
-  foreach(var pad in pads){
-   if(pad.view==startingPad||System.Array.Exists(saved.pads,p=>p.view==pad.view))continue;
-   pad.view.enabled=false;
-   Destroy(pad.view.gameObject);
+  ClearPlatforms();
+  if(startingPad){
+   if(saved.startingPadEnabled)RestoreStartingPad();
+   else startingPad.enabled=false;
+   startingPad.color=saved.startingPadColor;
   }
-  pads.Clear();
-  pads.AddRange(saved.pads);
-  if(startingPad){startingPad.enabled=saved.startingPadEnabled;startingPad.color=saved.startingPadColor;}
+  foreach(var platform in saved.placedPlatforms)AddPlacedPlatform(platform.center,platform.type,platform.width);
   padTime=saved.padTime;
-  for(int i=0;i<orbs.Length;i++)orbs[i].gameObject.SetActive(saved.visibleOrbs[i]);
+  RestoreOrbs(saved.visibleOrbs);
   charge=saved.charge;cooldown=saved.cooldown;
   flyingSpikes.RestoreRetryState(saved.flyingSpikes);
   patrols?.RestoreRetryDistance(saved.patrolDistance);
   decoyArmed=saved.decoyArmed;decoyTriggered=saved.decoyTriggered;decoyAge=saved.decoyAge;decoyPad=saved.decoyPad;
+  if(decoyArmed)EnsureDecoy();
   if(decoy){
    decoy.enabled=saved.decoyEnabled;
    decoy.transform.position=saved.decoyPosition;
    decoy.transform.localScale=saved.decoyScale;
    decoy.color=saved.decoyColor;
-   decoy.sprite=saved.decoySprite;
+   decoy.sprite=decoyTriggered?errorIcon:TideArt.Pic("Art/Orb");
   }
   ResetPlayer(saved.feet,saved.facingRight);
  }
  const float HitPause=.065f,HitFade=.095f;
  void BeginRetry(bool outOfView){
   if(finished)return;
+  CollectTouchedJournal();
   failures++;
   if(hintButton && failures>=Mathf.Max(1,failuresBeforeHint))TideGuideBook.Unlock(number);
   if(hintButton)hintButton.gameObject.SetActive(false);
@@ -468,11 +667,12 @@ public class TideTrial : MonoBehaviour {
   if(exitTravelLeft==0)ResetRoom();
   return;
  }
- if(fragment!=null&&fragment.HandleReading())return;
+ if(OpenJournalWhenGrounded())return;
  if(hintActionFrame==Time.frameCount)return;
  if(hintButton&&hintButton.gameObject.activeSelf&&Input.GetKeyDown(KeyCode.H)){ToggleRouteHint();return;}
  if(viewingHint){PositionRouteHint();return;}
- if(hintButton&&hintButton.gameObject.activeSelf&&admin&&RectTransformUtility.RectangleContainsScreenPoint(hintButton,Input.mousePosition)
+ if(admin && ((hintButton&&hintButton.gameObject.activeSelf&&RectTransformUtility.RectangleContainsScreenPoint(hintButton,Input.mousePosition))
+    || (journalButton.gameObject.activeSelf && RectTransformUtility.RectangleContainsScreenPoint(journalButton,Input.mousePosition)))
     &&(Input.GetMouseButtonDown(0)||Input.GetMouseButtonUp(0))){CancelDrag();return;}
  if(welcome){if(Input.GetKeyDown(KeyCode.Return)||Input.GetKeyDown(KeyCode.E))CloseControls();return;}
  if(storyExit){
@@ -514,7 +714,7 @@ public class TideTrial : MonoBehaviour {
  // Keep the jump arc consistent between Game view frame rates and in Shift slow motion.
   float startX=pos.x;
   int slices=Mathf.Max(1,Mathf.CeilToInt(dt*120f));
-  for(int i=0;i<slices&&!finished&&exitTravelLeft<=0&&(fragment==null||!fragment.Reading);i++)
+  for(int i=0;i<slices&&!finished&&exitTravelLeft<=0&&!TidePause.JournalOpen;i++)
    StepMovement(dt/slices,dir,i==0&&jump,held,i==0&&sprintPressed,inputDt/slices);
   if(finished)return;
   float travel=pos.x-startX;
@@ -528,6 +728,7 @@ public class TideTrial : MonoBehaviour {
  clock+=dt;takeoffAge+=dt;landingAge+=dt;
  float groundDepth=spikeHazards?.06f:.035f;
  bool onGround=FeetSupported(groundDepth,out support)&&(support!=-1||!FindSoleSlope(groundDepth,out _));
+ if(jump&&onGround&&!airborne&&vy==0&&support!=Spike)RecordLanding();
  jumpBuffer=jump?.13f:Mathf.Max(0,jumpBuffer-inputDt);
  ledgeGrace=onGround&&vy<=0&&support!=Spike?.10f:Mathf.Max(0,ledgeGrace-dt);
  if(onGround&&support==1&&vy<=0){
@@ -564,6 +765,9 @@ public class TideTrial : MonoBehaviour {
  int steps=Mathf.Max(1,Mathf.CeilToInt(Mathf.Max(Mathf.Abs(vx),Mathf.Abs(vy))*dt/.06f));
  for(int i=0;i<steps;i++){
   Vector2 nx=pos+Vector2.right*(vx*dt/steps);
+  // Follow both uphill and downhill by the distance actually travelled this substep.
+  if(vx!=0&&onGround&&support==-1&&vy<=0&&!boost&&TryRampFloor(nx,out float floorY)&&
+     Mathf.Abs(nx.y-floorY)<=Mathf.Abs(nx.x-pos.x)*1.6f+.012f)nx.y=floorY;
   if(!Block(nx,out int side))pos=nx;
   else if(side==Spike){BeginRetry(false);return;}
   else if(MarkedRoute&&side==-1&&onGround&&vy<=0&&vx!=0&&!Block(nx+Vector2.up*.06f,out _))pos=nx+Vector2.up*.06f;
@@ -574,6 +778,10 @@ public class TideTrial : MonoBehaviour {
    continue;
   }
   bool verticalHit=Block(ny,out int tile);
+  if(ny.y<pos.y&&tile==-1&&TryRampFloor(pos,out float landingY)&&landingY<=pos.y+.001f&&landingY>=ny.y-.001f){
+   Vector2 landing=new Vector2(pos.x,landingY);
+   if(!Block(landing,out _)){pos=landing;verticalHit=true;}
+  }
   if(verticalHit&&tile==-1&&ny.y<pos.y&&SlideOffSoleSlope(ny,pos.y-ny.y)){vx=0;continue;}
   // On descent the feet lead. A shoulder still touching an overhang must be able to slide free.
   if(verticalHit && tile!=Spike && ny.y<pos.y)
@@ -596,30 +804,46 @@ public class TideTrial : MonoBehaviour {
   BeginRetry(false);
   return;
  }
- bool wasAirborne=airborne;
  airborne=vy!=0||!FeetSupported(.06f,out _);
  foreach(var orb in orbs)if(charge==0&&orb.gameObject.activeSelf&&Vector2.Distance(pos+Vector2.up*.65f,orb.transform.position)<1.05f){charge=1;orb.gameObject.SetActive(false);audioOut.PlayOneShot(pickup);}
- if(wasAirborne&&!airborne)RecordLanding();
- if(fragment!=null&&fragment.Touch(pos,Half,Body)){
+ RecordLanding();
+ CollectTouchedJournal();
+ if(OpenJournalWhenGrounded())return;
+ if(Vector2.Distance(pos+Vector2.up*.7f,exit.transform.position)<1.1f)ReachExit();
+ }
+ void CollectTouchedJournal(){
+  if(fragment==null||!fragment.Touch(pos,Half,Body))return;
+  journalButton.gameObject.SetActive(true);
+  pendingJournal=fragmentDocument;
+  journalRequested=true;
+ }
+ internal void RequestJournalList(){
+  journalRequested=true;
+  OpenJournalWhenGrounded();
+ }
+ bool OpenJournalWhenGrounded(){
+  if(!journalRequested || respawnAt>0 || airborne || vy!=0 || !FeetSupported(.06f,out int floor) || floor==Spike)return false;
+  if(!TidePause.ShowJournal(pendingJournal))return false;
+  pendingJournal=null;journalRequested=false;
   CancelDrag();
   if(admin){admin=false;shiftView.CloseImmediately();}
-  return;
- }
- if(Vector2.Distance(pos+Vector2.up*.7f,exit.transform.position)<1.1f)ReachExit();
+  return true;
  }
  // Trial08: the first marked bounce pad seems to offer a bonus pickup above it.
  // Landing primes the false pickup once. Its sweep stays above a standing player.
  void ArmDecoy(Vector2 center,int kind){
   if(number!=8||kind!=1||!MarkedRoute||center!=placementHints[0].center||decoyArmed)return;
-  if(!decoy){
-   decoy=new GameObject("异常能量球").AddComponent<SpriteRenderer>();
-   decoy.transform.SetParent(transform,false);decoy.sortingOrder=8;
-   errorIcon=TideArt.Pic("Art/DataErrorPatrol");
-  }
+  EnsureDecoy();
   decoyPad=center;decoyArmed=true;decoy.enabled=true;
   TideArt.Fit(decoy,TideArt.Pic("Art/Orb"),.62f);
   decoy.color=new Color(.82f,.96f,1f);
   decoy.transform.position=center+Vector2.up*3.2f;
+ }
+ void EnsureDecoy(){
+  if(decoy)return;
+  decoy=new GameObject("异常能量球").AddComponent<SpriteRenderer>();
+  decoy.transform.SetParent(transform,false);decoy.sortingOrder=8;
+  errorIcon=TideArt.Pic("Art/DataErrorPatrol");
  }
  bool TickDecoy(float dt,Vector2 previous,Vector2 current){
   if(!decoyArmed||!decoy.enabled)return false;
@@ -774,6 +998,6 @@ public class TideTrial : MonoBehaviour {
  bool PlacePlatform(Vector2 m,int kind){
  float width=PlatformWidth(m,kind);
  if(kind<0||kind>=platformSprites.Length||PlacementError(m,width)!=null)return false;
- var r=Make("已放置平台",m,kind,width);pads.Add(new Pad{center=m,halfWidth=width*.5f,type=kind,view=r});charge=0;cooldown=.65f;ArmDecoy(m,kind);return true;
+  AddPlacedPlatform(m,kind,width);charge=0;cooldown=.65f;ArmDecoy(m,kind);return true;
  }
 }

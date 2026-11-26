@@ -12,6 +12,7 @@ public class TideStory : MonoBehaviour {
  bool[] taken=new bool[3];int count,meeting,elderLine; bool wifeReply, wifeLeaving; RectTransform fragment;bool speaking,viewing,portal,elderArrived,facingRight;
  UnityEngine.UI.Image portrait; string[] pages; int page;
  RectTransform movementHint; int lastDialogueInput=-1;
+ readonly TideDialogueSkip dialogueSkip=new TideDialogueSkip();
  float elapsed,nextStep,nextAction,animTime;int target;
  void Start(){
   TideLook.Story(this);
@@ -34,6 +35,7 @@ public class TideStory : MonoBehaviour {
   speaker.color=new Color(.92f,.77f,.46f);dialogText=ui.Caption(ui.Box("台词",dialog,Vector2.zero,new Vector2(134,40),new Vector2(728,64),Color.clear),"",24,TextAnchor.MiddleLeft);
   dialogText.fontSize=23;dialogText.lineSpacing=1.25f;
   ui.Border(dialog,new Color(.73f,.60f,.38f,.65f));
+  ui.DialogueContinue(dialog);
   portrait=ui.Box("头像",dialog,new Vector2(0,.5f),new Vector2(30,0),new Vector2(80,88),Color.white,manIdle[0]).GetComponent<Image>();
   ui.Click(dialog,Close);dialog.gameObject.SetActive(false);
   fragment=ui.Panel("记忆碎片",0,0,8,8,400,122,Color.white,TideArt.Pic("Art/Fragment2"));ui.Click(fragment,()=>fragment.gameObject.SetActive(false));fragment.gameObject.SetActive(false);
@@ -94,8 +96,7 @@ public class TideStory : MonoBehaviour {
   SpriteRenderer item=target<3?objects[target]:target==3||target==4?other:chapter==3?gate:null;
   Vector3 world=item?new Vector3(item.bounds.max.x+.12f,item.bounds.center.y,0):new Vector3(right-.3f,ground+1,0);
   bool conversation=target==3||target==4;
-  interactionPrompt.sizeDelta=new Vector2(conversation?170:124,34);
-  interactionLabel.text=conversation?"[E 或空格] 对话":target==5&&chapter==0?"[E] 出门":"[E] 交互";
+  interactionLabel.text=conversation?"[E] 对话":target==5&&chapter==0?"[E] 出门":"[E] 交互";
   var screen=Camera.main.WorldToScreenPoint(world);var viewport=Camera.main.pixelRect;
   float scale=ui.root.GetComponent<Canvas>().scaleFactor;
   float halfWidth=interactionPrompt.sizeDelta.x*scale*.5f;
@@ -110,9 +111,9 @@ public class TideStory : MonoBehaviour {
   interactionPrompt.anchoredPosition=point;
  }
  void Update(){
-  if(TidePause.BlocksInput)return;
+  if(TidePause.BlocksInput){dialogueSkip.Reset();return;}
   float dt=Time.deltaTime;elapsed+=dt;bool action=Input.GetKeyDown(KeyCode.E)||Input.GetKeyDown(KeyCode.Return);
-  if(viewing){if(action||Input.GetKeyDown(KeyCode.Space))ClosePhoto();return;}
+  if(viewing){dialogueSkip.Reset();if(action||Input.GetKeyDown(KeyCode.Space))ClosePhoto();return;}
   float dx=speaking?0:Input.GetAxisRaw("Horizontal");Vector3 p=hero.transform.position;p.x=Mathf.Clamp(p.x+dx*dt*4,left,right);hero.transform.position=p;
   if(dx!=0){if(movementHint&&movementHint.gameObject.activeSelf)movementHint.gameObject.SetActive(false);facingRight=dx>0;animTime+=dt;if(Time.time>=nextStep){audioOut.PlayOneShot(step,chapter==0?TideLook.WoodStepVolume:.28f);nextStep=Time.time+.38f;}}
   hero.sprite=dx==0?manIdle[(int)(elapsed*6)%manIdle.Length]:walk[(int)(animTime*9)%walk.Length];hero.flipX=dx!=0&&facingRight;
@@ -121,7 +122,7 @@ public class TideStory : MonoBehaviour {
    var frames=stepping?elderWalk:chapter==1&&meeting==1?wifeFront:npc;
    other.sprite=frames[(int)(elapsed*(stepping?10:6))%frames.Length];
    if(chapter==3)TideArt.Fit(other,other.sprite,1.9f);
-   if(chapter==1){other.flipX=meeting>=2;TideArt.Fit(other,other.sprite,1.95f);}
+   if(chapter==1)other.flipX=meeting>=2;
   }
   if(chapter==2)background.sprite=(p.x>=0&&p.x<4.6f)?broken:field;
   if(chapter==3){background.sprite=glitch[(int)(elapsed*2)%glitch.Length];if(!elderArrived){other.transform.position=Vector3.MoveTowards(other.transform.position,new Vector3(.4f,ground,0),1.5f*dt);elderArrived=Vector3.Distance(other.transform.position,new Vector3(.4f,ground,0))<.01f;}}
@@ -136,6 +137,7 @@ public class TideStory : MonoBehaviour {
    if(open)target=5;}
   UpdateInteractionPrompt();
   HandleInteraction(action,Input.GetKeyDown(KeyCode.Space));
+  if(dialogueSkip.ShouldRepeat(speaking))Close();
  }
  void HandleInteraction(bool action,bool space){
   if(speaking){if(action||space)Close();return;}
