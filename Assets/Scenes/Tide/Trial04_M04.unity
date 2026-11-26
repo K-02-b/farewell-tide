@@ -593,9 +593,6 @@ MonoBehaviour:
   - center: {x: 9.1, y: 3.15}
     kind: 1
     width: 2.6
-  - center: {x: 13.2, y: 10.15}
-    kind: 0
-    width: 2.5
   - center: {x: 16.55, y: 3.35}
     kind: 1
     width: 2.8

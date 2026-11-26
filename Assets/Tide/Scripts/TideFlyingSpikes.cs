@@ -30,6 +30,12 @@ public sealed class TideFlyingSpikes
         public bool warnsOnLanding;
         public bool fired;
     }
+    public struct RetryState
+    {
+        internal float lift, speed, warningLeft;
+        internal bool fired, visible;
+        internal Vector3 visualOffset;
+    }
 
     public TideFlyingSpikes(int level, IEnumerable<Collider2D> colliders, Transform parent, float jumpSpeed)
     {
@@ -100,6 +106,52 @@ public sealed class TideFlyingSpikes
             strip.visual.transform.localPosition = Vector3.zero;
             strip.visual.SetActive(false);
         }
+    }
+    public RetryState[] CaptureRetryState()
+    {
+        var state = new RetryState[strips.Count];
+        for (int i = 0; i < strips.Count; i++)
+        {
+            var strip = strips[i];
+            state[i] = new RetryState {
+                lift = strip.lift, speed = strip.speed, warningLeft = strip.warningLeft, fired = strip.fired,
+                visible = strip.visual.activeSelf, visualOffset = strip.visual.transform.localPosition
+            };
+        }
+        return state;
+    }
+
+    public void RestoreRetryState(RetryState[] state)
+    {
+        for (int i = 0; i < strips.Count; i++)
+        {
+            var strip = strips[i];
+            var saved = state[i];
+            strip.lift = saved.lift;
+            strip.speed = saved.speed;
+            strip.warningLeft = saved.warningLeft;
+            strip.fired = saved.fired;
+            strip.visual.transform.localPosition = saved.visualOffset;
+            strip.visual.SetActive(saved.visible);
+        }
+    }
+
+    public bool ThreatensLanding(Vector2 feet, float half, float height, float time)
+    {
+        foreach (var strip in strips)
+        {
+            if (strip.lift >= 24f || feet.x + half < strip.bounds.min.x || feet.x - half > strip.bounds.max.x) continue;
+            float startLift = strip.lift, speed = strip.speed, warning = strip.warningLeft;
+            if (!strip.fired)
+            {
+                if (feet.y < strip.bounds.max.y || strip.warnsOnLanding) continue;
+                speed = Mathf.Max(minimumSpeed, (feet.y - strip.bounds.max.y) / InterceptTime);
+            }
+            float endLift = startLift + speed * Mathf.Max(0, time - warning);
+            var box = Rect.MinMaxRect(feet.x - half, feet.y - endLift, feet.x + half, feet.y + height - startLift);
+            if (box.yMax >= strip.bounds.min.y && box.yMin <= strip.bounds.max.y && Touches(box, strip)) return true;
+        }
+        return false;
     }
 
     public void Dispose()

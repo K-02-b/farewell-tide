@@ -51,9 +51,28 @@ public class TideTrial : MonoBehaviour {
  const float FallLimit=19f,FastFallLimit=25f;
  bool fastFallHeld,spawnFacingRight;
  double respawnAt;
+ LandingCheckpoint checkpoint;
  Vector2 pos;const float Half=.29f,Body=1.24f;
  readonly List<Pad> pads=new List<Pad>();struct Pad {public Vector2 center;public float halfWidth;public int type;public SpriteRenderer view;}
+ sealed class LandingCheckpoint{
+  public Vector2 feet;
+  public bool facingRight,hiddenBrickShown;
+  public Pad[] pads;
+  public bool[] visibleOrbs;
+  public int charge;
+  public float cooldown,padTime,patrolDistance;
+  public bool startingPadEnabled;
+  public Color startingPadColor;
+  public TideFlyingSpikes.RetryState[] flyingSpikes;
+  public bool decoyEnabled,decoyArmed,decoyTriggered;
+  public float decoyAge;
+  public Vector2 decoyPad;
+  public Vector3 decoyPosition,decoyScale;
+  public Color decoyColor;
+  public Sprite decoySprite;
+ }
  readonly HashSet<Collider2D> terrain=new HashSet<Collider2D>();readonly Collider2D[] hits=new Collider2D[64];
+ readonly RaycastHit2D[] surfaceHits=new RaycastHit2D[16];
  TideHUD ui;TideShiftView shiftView;RectTransform energyFill;SpriteRenderer ghost;
  RectTransform welcome,storyExit;
  int openedExitFrame;
@@ -181,7 +200,7 @@ public class TideTrial : MonoBehaviour {
    var tag=ui.Box("放置顺序",marker,new Vector2(.5f,1),new Vector2(0,29),new Vector2(41,27),TideHUD.ink);
    ui.Caption(tag,(i+1).ToString(),17,TextAnchor.MiddleCenter);
   }
-  string note=number==4?"按编号参考放置。踩绿台按跳跃，红台放在刺上方；这里可不用紫台。":"按编号查看一种放置路线。平台的颜色表示类型，仍可自由尝试其他走法。";
+  string note=number==4?TideGuideBook.RoomFourNote:"按编号查看一种放置路线。平台的颜色表示类型，仍可自由尝试其他走法。";
   hintOverlay.anchorMin=Vector2.zero;hintOverlay.anchorMax=Vector2.one;
   hintOverlay.offsetMin=hintOverlay.offsetMax=Vector2.zero;
   var legend=ui.Box("路线说明",hintOverlay,new Vector2(.5f,0),new Vector2(0,8),new Vector2(720,37),TideHUD.ink);
@@ -269,6 +288,48 @@ public class TideTrial : MonoBehaviour {
   }
   return false;
  }
+ bool FindSoleSlope(float depth,out Vector2 normal){
+  normal=Vector2.zero;
+  // The hero slides when only the outer edge of the collision box touches a steep slope.
+  if(TerrainHit(pos-Vector2.up*depth,.12f,depth,out _))return false;
+  for(int side=-1;side<=1;side+=2){
+   Vector2 toe=pos+new Vector2(side*(Half-.002f),.02f);
+   if(!SolidSurface(toe,Vector2.down,depth+.053f,out Vector2 floor))continue;
+   // Some diagonal tiles have a short flat lip where they meet a vertical wall.
+   if(floor.y>.9f){
+    if(!SolidSurface(pos+Vector2.up*.65f,Vector2.right*side,Half+.15f,out Vector2 wall)||wall.x*side>-.94f)continue;
+    if(!SolidSurface(toe-Vector2.right*(side*.15f),Vector2.down,depth+.20f,out floor))continue;
+   }
+   if(floor.x*side>=-.35f||floor.y<.45f||floor.y>.9f)continue;
+   normal=floor;
+   return true;
+  }
+  return false;
+ }
+ bool SolidSurface(Vector2 origin,Vector2 direction,float distance,out Vector2 normal){
+  normal=Vector2.zero;
+  int count=Physics2D.RaycastNonAlloc(origin,direction,surfaceHits,distance);
+  float nearest=float.PositiveInfinity;
+  for(int i=0;i<count;i++){
+   var hit=surfaceHits[i];
+   if(hit.distance<=0||hit.distance>=nearest||!terrain.Contains(hit.collider)||spikes.Contains(hit.collider))continue;
+   nearest=hit.distance;
+   normal=hit.normal;
+  }
+  return nearest<float.PositiveInfinity;
+ }
+ bool SlideOffSoleSlope(Vector2 next,float depth){
+  if(!FindSoleSlope(depth,out Vector2 slope))return false;
+  var sideways=Vector2.right*(Mathf.Max(.025f,depth*slope.y/Mathf.Abs(slope.x)+.004f)*Mathf.Sign(slope.x));
+  Vector2 slide=next+sideways;
+  if(Block(slide,out _)){
+   slide=pos+sideways;
+   if(Block(slide,out _))return false;
+  }
+  pos=slide;
+  if(horizontalSpeed*slope.x<0)horizontalSpeed=0;
+  return true;
+ }
  void RestoreStartingPad(){
   padTime=-1;
   if(!startingPad)return;
@@ -281,24 +342,85 @@ public class TideTrial : MonoBehaviour {
   flyingSpikes.Reset();
   patrols?.Reset();
   if(decoy){decoy.enabled=false;decoyArmed=decoyTriggered=false;decoyAge=0;}
-  feedback?.Reset();
-  CancelDrag();
   foreach(var pad in pads)if(pad.view!=startingPad){pad.view.enabled=false;Destroy(pad.view.gameObject);}
   pads.Clear();
   RestoreStartingPad();
   foreach(var orb in orbs)orb.gameObject.SetActive(true);
+  charge=0;cooldown=0;checkpoint=null;
+  ResetPlayer(spawn,spawnFacingRight);
+ }
+ void ResetPlayer(Vector2 feet,bool facingRight){
+  feedback?.Reset();
+  CancelDrag();
   foreach(var hint in hintViews)hint.enabled=false;
   finished=admin=airborne=playerJump=jumpReleased=fastFallHeld=false;
-  jumpBuffer=ledgeGrace=horizontalSpeed=vy=dash=dxDash=cooldown=clock=0;
+  jumpBuffer=ledgeGrace=horizontalSpeed=vy=dash=dxDash=clock=0;
   landingAge=landingDuration=0;respawnAt=0;
   takeoffAge=float.PositiveInfinity;
-  charge=0;support=-1;pos=spawn;
+  support=-1;pos=feet;
   audioOut.Stop();
-  hero.flipX=spawnFacingRight;hero.color=Color.white;
-  energyFill.sizeDelta=new Vector2(0,5);
+  hero.flipX=facingRight;hero.color=Color.white;
+  energyFill.sizeDelta=new Vector2(72*charge,5);
   shiftView.CloseImmediately();
   RenderHero(false);
   if(hintButton)hintButton.gameObject.SetActive(TideGuideBook.Unlocked(number));
+ }
+ // Capture after a landing and after pickups, so the orb, energy and pad state travel together.
+ void RecordLanding(){
+  const float reactionTime=.30f;
+  if(pos.y<0||Block(pos,out _)||!FeetSupported(.06f,out int floor)||floor==Spike)return;
+  if(startingPad&&startingPad.enabled&&startingPadLifetime>0&&padTime>=0&&startingPadLifetime-padTime<reactionTime){
+   var bounds=startingPad.bounds;
+   if(Mathf.Abs(pos.x-bounds.center.x)<bounds.extents.x+Half&&Mathf.Abs(pos.y-bounds.max.y)<.065f)return;
+  }
+  if(flyingSpikes.ThreatensLanding(pos,Half,Body,reactionTime)||
+     (patrols!=null&&patrols.ThreatensLanding(pos,Half,Body,reactionTime)))return;
+  if(decoy&&decoy.enabled&&decoyTriggered){
+   var area=decoy.bounds;
+   area.Expand(new Vector3(2.6f,1.5f,0));
+   if(area.Intersects(new Bounds(pos+Vector2.up*(Body*.5f),new Vector3(Half*2,Body,0))))return;
+  }
+  checkpoint=new LandingCheckpoint{
+   feet=pos,facingRight=hero.flipX,hiddenBrickShown=hiddenBrickShown,pads=pads.ToArray(),
+   visibleOrbs=new bool[orbs.Length],charge=charge,cooldown=cooldown,padTime=padTime,
+   startingPadEnabled=startingPad&&startingPad.enabled,startingPadColor=startingPad?startingPad.color:Color.white,
+   flyingSpikes=flyingSpikes.CaptureRetryState(),patrolDistance=patrols?.Travelled??0,
+   decoyEnabled=decoy&&decoy.enabled,decoyArmed=decoyArmed,decoyTriggered=decoyTriggered,
+   decoyAge=decoyAge,decoyPad=decoyPad,decoyPosition=decoy?decoy.transform.position:Vector3.zero,
+   decoyScale=decoy?decoy.transform.localScale:Vector3.one,decoyColor=decoy?decoy.color:Color.white,
+   decoySprite=decoy?decoy.sprite:null
+  };
+  for(int i=0;i<orbs.Length;i++)checkpoint.visibleOrbs[i]=orbs[i].gameObject.activeSelf;
+ }
+ void RestoreLanding(){
+  var saved=checkpoint;
+  if(saved==null){ResetRoom();return;}
+  if(hiddenBrickShown!=saved.hiddenBrickShown){
+   hiddenBrickShown=saved.hiddenBrickShown;
+   SetHiddenBrick(hiddenBrickShown?hiddenBrickTile:null);
+  }
+  foreach(var pad in pads){
+   if(pad.view==startingPad||System.Array.Exists(saved.pads,p=>p.view==pad.view))continue;
+   pad.view.enabled=false;
+   Destroy(pad.view.gameObject);
+  }
+  pads.Clear();
+  pads.AddRange(saved.pads);
+  if(startingPad){startingPad.enabled=saved.startingPadEnabled;startingPad.color=saved.startingPadColor;}
+  padTime=saved.padTime;
+  for(int i=0;i<orbs.Length;i++)orbs[i].gameObject.SetActive(saved.visibleOrbs[i]);
+  charge=saved.charge;cooldown=saved.cooldown;
+  flyingSpikes.RestoreRetryState(saved.flyingSpikes);
+  patrols?.RestoreRetryDistance(saved.patrolDistance);
+  decoyArmed=saved.decoyArmed;decoyTriggered=saved.decoyTriggered;decoyAge=saved.decoyAge;decoyPad=saved.decoyPad;
+  if(decoy){
+   decoy.enabled=saved.decoyEnabled;
+   decoy.transform.position=saved.decoyPosition;
+   decoy.transform.localScale=saved.decoyScale;
+   decoy.color=saved.decoyColor;
+   decoy.sprite=saved.decoySprite;
+  }
+  ResetPlayer(saved.feet,saved.facingRight);
  }
  const float HitPause=.065f,HitFade=.095f;
  void BeginRetry(bool outOfView){
@@ -362,7 +484,8 @@ public class TideTrial : MonoBehaviour {
  }
  if(respawnAt>0){
   float remaining=(float)(respawnAt-Time.timeAsDouble);
-  if(remaining<=0||Input.GetKeyDown(KeyCode.R)){ResetRoom();return;}
+  if(Input.GetKeyDown(KeyCode.R)){ResetRoom();return;}
+  if(remaining<=0){RestoreLanding();return;}
   var tint=hero.color;
   tint.a=Mathf.Clamp01(remaining/HitFade);
   hero.color=tint;
@@ -403,7 +526,8 @@ public class TideTrial : MonoBehaviour {
  void StepMovement(float dt,float dir,bool jump,bool held,bool sprintPressed,float inputDt){
  Vector2 previousFeet=pos;
  clock+=dt;takeoffAge+=dt;landingAge+=dt;
- bool onGround=FeetSupported(spikeHazards?.06f:.035f,out support);
+ float groundDepth=spikeHazards?.06f:.035f;
+ bool onGround=FeetSupported(groundDepth,out support)&&(support!=-1||!FindSoleSlope(groundDepth,out _));
  jumpBuffer=jump?.13f:Mathf.Max(0,jumpBuffer-inputDt);
  ledgeGrace=onGround&&vy<=0&&support!=Spike?.10f:Mathf.Max(0,ledgeGrace-dt);
  if(onGround&&support==1&&vy<=0){
@@ -450,6 +574,7 @@ public class TideTrial : MonoBehaviour {
    continue;
   }
   bool verticalHit=Block(ny,out int tile);
+  if(verticalHit&&tile==-1&&ny.y<pos.y&&SlideOffSoleSlope(ny,pos.y-ny.y)){vx=0;continue;}
   // On descent the feet lead. A shoulder still touching an overhang must be able to slide free.
   if(verticalHit && tile!=Spike && ny.y<pos.y)
    verticalHit=FeetSupported(Mathf.Max(.003f,pos.y-ny.y),out tile);
@@ -471,8 +596,10 @@ public class TideTrial : MonoBehaviour {
   BeginRetry(false);
   return;
  }
- airborne=vy>0||vy< -1f||!FeetSupported(.06f,out _);
+ bool wasAirborne=airborne;
+ airborne=vy!=0||!FeetSupported(.06f,out _);
  foreach(var orb in orbs)if(charge==0&&orb.gameObject.activeSelf&&Vector2.Distance(pos+Vector2.up*.65f,orb.transform.position)<1.05f){charge=1;orb.gameObject.SetActive(false);audioOut.PlayOneShot(pickup);}
+ if(wasAirborne&&!airborne)RecordLanding();
  if(fragment!=null&&fragment.Touch(pos,Half,Body)){
   CancelDrag();
   if(admin){admin=false;shiftView.CloseImmediately();}

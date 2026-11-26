@@ -56,6 +56,7 @@ public sealed class TidePatrols
     readonly List<Patrol> active = new List<Patrol>();
     Vector2 hitExtents;
     float travelled;
+    public float Travelled => travelled;
 
     public static TidePatrols Create(int number, Transform parent)
     {
@@ -87,10 +88,27 @@ public sealed class TidePatrols
         return group;
     }
 
-    public void Reset()
+    public void Reset() => RestoreRetryDistance(0);
+
+    public void RestoreRetryDistance(float distance)
     {
-        travelled = 0f;
-        foreach (var patrol in active) patrol.visual.position = patrol.start;
+        travelled = distance;
+        foreach (var patrol in active) patrol.visual.position = PositionAt(patrol, travelled);
+    }
+
+    public bool ThreatensLanding(Vector2 feet, float halfWidth, float height, float time)
+    {
+        Vector2 center = feet + Vector2.up * (height * .5f);
+        // Include the patrol's full travel distance so turning near an endpoint is covered.
+        Vector2 half = hitExtents + new Vector2(halfWidth, height * .5f);
+        foreach (var patrol in active)
+        {
+            Vector2 margin = patrol.direction * (Speed * time);
+            Vector2 limit = half + new Vector2(Mathf.Abs(margin.x), Mathf.Abs(margin.y));
+            Vector2 offset = center - (Vector2)patrol.visual.position;
+            if (Mathf.Abs(offset.x) <= limit.x && Mathf.Abs(offset.y) <= limit.y) return true;
+        }
+        return false;
     }
 
     public bool Tick(float dt, Vector2 previousFeet, Vector2 currentFeet, float heroHalfWidth, float heroHeight)
@@ -102,12 +120,15 @@ public sealed class TidePatrols
         foreach (var patrol in active)
         {
             Vector2 before = patrol.visual.position;
-            Vector2 after = patrol.start + patrol.direction * Mathf.PingPong(travelled, patrol.distance);
+            Vector2 after = PositionAt(patrol, travelled);
             patrol.visual.position = after;
             contact |= CrossesBox(previousFeet + bodyOffset - before, currentFeet + bodyOffset - after, half);
         }
         return contact;
     }
+
+    static Vector2 PositionAt(Patrol patrol, float distance) =>
+        patrol.start + patrol.direction * Mathf.PingPong(distance, patrol.distance);
 
     // Sweep the relative movement, so a dash or two actors crossing cannot skip a hit.
     static bool CrossesBox(Vector2 from, Vector2 to, Vector2 half)

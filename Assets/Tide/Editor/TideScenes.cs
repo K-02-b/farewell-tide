@@ -347,7 +347,7 @@ public static class TideScenes {
    new TideTrial.PlatformSpot(14,14.35f,2),new TideTrial.PlatformSpot(24.1f,6.9f,0,2.2f),
    new TideTrial.PlatformSpot(15.25f,3.85f,1,4.5f),new TideTrial.PlatformSpot(7.5f,4.2f,0)
   }:new[]{
-   new TideTrial.PlatformSpot(3.5f,3.15f,0,3.2f),new TideTrial.PlatformSpot(9.1f,3.15f,1,2.6f),new TideTrial.PlatformSpot(13.2f,10.15f,0,2.5f),
+   new TideTrial.PlatformSpot(3.5f,3.15f,0,3.2f),new TideTrial.PlatformSpot(9.1f,3.15f,1,2.6f),
    new TideTrial.PlatformSpot(16.55f,3.35f,1,2.8f),new TideTrial.PlatformSpot(20.8f,12.25f,0,2.7f),new TideTrial.PlatformSpot(25.7f,3.7f,0)
   };
   SetTrialPickups(t,upper?new[]{new Vector2(9.9f,15.85f),new Vector2(20.15f,15.45f),

@@ -6,6 +6,7 @@ using UnityEngine.UI;
 public sealed class TideGuideBook
 {
     const int Rooms = 10;
+    internal const string RoomFourNote = "从第一个绿台直接越过前方带刺的砖台。其余平台按编号参考放置。";
     readonly TideHUD hud;
     readonly Image[] labels = new Image[Rooms];
     readonly Text title, note, lockedMessage;
@@ -66,6 +67,7 @@ public sealed class TideGuideBook
         diagram.color = Color.white;
         lockedMessage.gameObject.SetActive(!open);
         note.text = open ? "按编号查看参考落点。红台落脚，绿台高跳，紫台冲刺。" : "";
+        if (open && room == 4) note.text = RoomFourNote;
         if (open && room == 5) note.text = "6 号红台下的刺会先抖动。趁它还没弹起，向右短跳，从倒刺下方落到门前。";
         if (open && room == 9) note.text = "在 3 号紫台朝右按 V，冲向 4 号绿台。落在绿台左端后，看准右侧巡逻再起跳。";
     }
