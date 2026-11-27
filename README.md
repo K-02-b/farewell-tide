@@ -27,3 +27,6 @@ Falls, spikes, and other lethal hazards return the player to the center of the l
 The title screen resumes the last story scene or trial checkpoint. The Esc stage menu includes six story acts and ten trials, unlocked as they are reached. Selecting an unlocked entry replays it from its start.
 
 After collecting a journal, use Tab to browse the collection. Space turns the page and Esc closes the journal. Checkpoints activate when the player stands near the center of a fixed platform.
+
+
+A checkpoint uses the latest fixed brick center for respawn. It restores the platforms and energy from the most recent orb pickup confirmed by standing on fixed brick.

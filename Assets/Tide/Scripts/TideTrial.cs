@@ -55,6 +55,7 @@ public class TideTrial : MonoBehaviour {
  bool fastFallHeld,spawnFacingRight;
  double respawnAt;
  LandingCheckpoint checkpoint;
+ LandingCheckpoint confirmedResources,pendingPickup;
  struct FixedLanding { public Vector2 center; public float halfWidth,surfaceY; }
  readonly List<FixedLanding> fixedLandings=new List<FixedLanding>();
  int touchedLanding=-1;
@@ -80,7 +81,11 @@ public class TideTrial : MonoBehaviour {
   public Vector3 decoyPosition,decoyScale;
   public Color decoyColor;
  }
- const string LandingKeyPrefix="Tide.Landing.v2.",OldLandingKeyPrefix="Tide.Landing.v1.";
+ [System.Serializable] sealed class LandingHistory{
+  public int version;
+  public LandingCheckpoint[] landings;
+ }
+ const string LandingKeyPrefix="Tide.Landing.v4.",HistoryKeyPrefix="Tide.Landing.v3.",SingleLandingKeyPrefix="Tide.Landing.v2.",OldLandingKeyPrefix="Tide.Landing.v1.";
  static string resumeLandingScene;
  [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
  static void ResetResumeRequest(){resumeLandingScene=null;}
@@ -88,9 +93,12 @@ public class TideTrial : MonoBehaviour {
  public static void ClearSavedLanding(string sceneName){
   if(resumeLandingScene==sceneName)resumeLandingScene=null;
   var key=LandingKeyPrefix+sceneName;
+  var singleKey=SingleLandingKeyPrefix+sceneName;
   var oldKey=OldLandingKeyPrefix+sceneName;
-  if(!PlayerPrefs.HasKey(key)&&!PlayerPrefs.HasKey(oldKey))return;
+  if(!PlayerPrefs.HasKey(key)&&!PlayerPrefs.HasKey(HistoryKeyPrefix+sceneName)&&!PlayerPrefs.HasKey(singleKey)&&!PlayerPrefs.HasKey(oldKey))return;
   PlayerPrefs.DeleteKey(key);
+  PlayerPrefs.DeleteKey(HistoryKeyPrefix+sceneName);
+  PlayerPrefs.DeleteKey(singleKey);
   PlayerPrefs.DeleteKey(oldKey);
   PlayerPrefs.Save();
  }
@@ -142,6 +150,7 @@ public class TideTrial : MonoBehaviour {
  if(MarkedRoute)feedback=new TideTrialFeedback(hero,transform);
  initialOrbs=CaptureOrbs();
  RestoreStartingPad();
+ confirmedResources=CaptureResources();
  if(number==1&&placementHints!=null)foreach(var spot in placementHints){
   var view=Make("建议落点",spot.center,spot.kind,spot.Width);view.color=new Color(1,1,1,.36f);view.enabled=false;hintViews.Add(view);
  }
@@ -164,35 +173,68 @@ public class TideTrial : MonoBehaviour {
  }
 
  bool TryResumeSavedLanding(){
-  string sceneName=gameObject.scene.name;
-  bool requested=resumeLandingScene==sceneName;
-  resumeLandingScene=null;
-  string key=LandingKeyPrefix+sceneName;
-  if(!requested){ClearSavedLanding(sceneName);return false;}
-  string oldKey=OldLandingKeyPrefix+sceneName;
-  bool legacy=!PlayerPrefs.HasKey(key);
-  if(legacy&&!PlayerPrefs.HasKey(oldKey))return false;
+  string scene=gameObject.scene.name;
+  bool requested=resumeLandingScene==scene;resumeLandingScene=null;
+  if(!requested){ClearSavedLanding(scene);return false;}
+  bool migrated=false;
   try{
-   var saved=JsonUtility.FromJson<LandingCheckpoint>(PlayerPrefs.GetString(legacy?oldKey:key));
-   if(saved!=null&&saved.version==(legacy?1:2)&&saved.visibleOrbs!=null&&saved.visibleOrbs.Length==orbs.Length&&
-      saved.placedPlatforms!=null&&saved.flyingSpikes!=null&&saved.flyingSpikes.Length==flyingSpikes.StripCount&&
-      saved.feet.x>=0&&saved.feet.x<=w&&saved.feet.y>=0&&saved.feet.y<h&&
-      System.Array.TrueForAll(saved.placedPlatforms,p=>p.type>=0&&p.type<platformSprites.Length&&p.width>0)&&
-      ResolveSavedCenter(saved,legacy)){
-    checkpoint=saved;
-    if(legacy){
-     saved.version=2;
-     PlayerPrefs.SetString(key,JsonUtility.ToJson(saved));
-     PlayerPrefs.DeleteKey(oldKey);
-     PlayerPrefs.Save();
-    }
-    if(number==10&&saved.movedExit){exitRelocated=true;exit.transform.position=RelocatedExitPosition;}
+   if(PlayerPrefs.HasKey(LandingKeyPrefix+scene)){
+    var saved=JsonUtility.FromJson<LandingCheckpoint>(PlayerPrefs.GetString(LandingKeyPrefix+scene));
+    if(ValidCheckpoint(saved,4))checkpoint=saved;
+   }else if(PlayerPrefs.HasKey(HistoryKeyPrefix+scene)){
+    var old=JsonUtility.FromJson<LandingHistory>(PlayerPrefs.GetString(HistoryKeyPrefix+scene));
+    if(old!=null&&old.version==3&&old.landings!=null)checkpoint=ReadLegacyHistory(old.landings);
+    migrated=true;
+   }else{
+    bool legacy=!PlayerPrefs.HasKey(SingleLandingKeyPrefix+scene);
+    string key=(legacy?OldLandingKeyPrefix:SingleLandingKeyPrefix)+scene;
+    if(!PlayerPrefs.HasKey(key))return false;
+    var saved=JsonUtility.FromJson<LandingCheckpoint>(PlayerPrefs.GetString(key));
+    if(ValidCheckpoint(saved,legacy?1:2))checkpoint=saved;
+    migrated=true;
+   }
+   if(checkpoint!=null){
+    checkpoint.version=4;
+    confirmedResources=checkpoint;
     RestoreLanding();
-    return true;
+    if(migrated&&checkpoint!=null)WriteCheckpoint();
+    return checkpoint!=null;
    }
   }catch(System.ArgumentException e){Debug.LogWarning("无法读取关卡落脚点："+e.Message);}
-  ClearSavedLanding(sceneName);
+  ClearSavedLanding(scene);
   return false;
+ }
+ bool ValidCheckpoint(LandingCheckpoint saved,int version){
+  return saved!=null&&saved.version==version&&saved.visibleOrbs!=null&&saved.visibleOrbs.Length==orbs.Length&&
+     saved.placedPlatforms!=null&&saved.flyingSpikes!=null&&saved.flyingSpikes.Length==flyingSpikes.StripCount&&
+     saved.charge>=0&&saved.charge<=1&&System.Array.TrueForAll(saved.placedPlatforms,
+       p=>p.type>=0&&p.type<platformSprites.Length&&p.width>0&&p.width<=w&&p.center.x>=0&&p.center.x<=w&&p.center.y>=0&&p.center.y<h)&&
+     ResolveSavedCenter(saved,version);
+ }
+ LandingCheckpoint ReadLegacyHistory(LandingCheckpoint[] old){
+  LandingCheckpoint latest=null;
+  for(int i=old.Length-1;i>=0;i--){
+   var entry=old[i];
+   if(!ValidCheckpoint(entry,2))continue;
+   if(latest==null)latest=entry;
+   if(entry.charge==1&&entry.movedExit==latest.movedExit&&SameOrbs(entry.visibleOrbs,latest.visibleOrbs)){
+    CopyLandingLocation(latest,entry);
+    return entry;
+   }
+  }
+  return latest;
+ }
+ static bool SameOrbs(bool[] first,bool[] second){
+  for(int i=0;i<first.Length;i++)if(first[i]!=second[i])return false;
+  return true;
+ }
+ void WriteCheckpoint(){
+  string scene=gameObject.scene.name;
+  PlayerPrefs.SetString(LandingKeyPrefix+scene,JsonUtility.ToJson(checkpoint));
+  PlayerPrefs.DeleteKey(HistoryKeyPrefix+scene);
+  PlayerPrefs.DeleteKey(SingleLandingKeyPrefix+scene);
+  PlayerPrefs.DeleteKey(OldLandingKeyPrefix+scene);
+  PlayerPrefs.Save();
  }
 
  void OnDestroy(){flyingSpikes?.Dispose();}
@@ -238,11 +280,14 @@ public class TideTrial : MonoBehaviour {
   }
   return -1;
  }
- bool ResolveSavedCenter(LandingCheckpoint saved,bool legacy){
+ bool ResolveSavedCenter(LandingCheckpoint saved,int version){
+  bool legacy=version==1;
   int i=FixedLandingAt(saved.feet,legacy);
   if(i<0)return false;
   Vector2 center=fixedLandings[i].center;
   if(!legacy&&Vector2.Distance(saved.feet,center)>.01f)return false;
+  // In the pickup format, resources and the last reached centre can come from different moments.
+  if(version==4){saved.feet=center;return true;}
   if(saved.startingPadEnabled&&startingPad&&OnPadTop(saved.feet,startingPad.transform.position,startingPad.bounds.extents.x))return false;
   foreach(var p in saved.placedPlatforms){
    if(OnPadTop(saved.feet,p.center,p.width*.5f))return false;
@@ -252,6 +297,10 @@ public class TideTrial : MonoBehaviour {
  }
  static bool OnPadTop(Vector2 feet,Vector2 center,float halfWidth){
   return Mathf.Abs(feet.x-center.x)<halfWidth+Half&&Mathf.Abs(feet.y-center.y-.169f)<.065f;
+ }
+ bool StandingOnPad(){
+  foreach(var pad in pads)if(OnPadTop(pos,pad.center,pad.halfWidth))return true;
+  return false;
  }
  void PrepareHiddenBrick(){
   if(number!=1 && number!=9)return;
@@ -525,6 +574,7 @@ public class TideTrial : MonoBehaviour {
  }
  void ResetRoom(){
   ClearSavedLanding(gameObject.scene.name);
+  pendingPickup=null;
   if(hiddenBrickShown){SetHiddenBrick(null);hiddenBrickShown=false;}
   flyingSpikes.Reset();
   patrols?.Reset();
@@ -533,9 +583,11 @@ public class TideTrial : MonoBehaviour {
   RestoreStartingPad();
   RestoreOrbs(initialOrbs);
   charge=0;cooldown=0;checkpoint=null;
+  confirmedResources=CaptureResources();
   ResetPlayer(spawn,spawnFacingRight);
  }
  void ResetPlayer(Vector2 feet,bool facingRight){
+  pendingPickup=null;
   feedback?.Reset();
   CancelDrag();
   foreach(var hint in hintViews)hint.enabled=false;
@@ -552,47 +604,94 @@ public class TideTrial : MonoBehaviour {
   RenderHero(false);
   if(hintButton)hintButton.gameObject.SetActive(TideGuideBook.Unlocked(number));
  }
- // Capture after a landing and after pickups, so the orb, energy and pad state travel together.
+ // Floor contact confirms the last pickup. Reaching the centre separately records the respawn location.
  void RecordLanding(){
-  const float reactionTime=.30f;
   if(airborne){
-   // A sub-step can settle the last millimetres after respawn without leaving the platform.
    if(touchedLanding>=0&&(vy>0||FixedLandingAt(pos)!=touchedLanding))touchedLanding=-1;
    return;
   }
+  if(pendingPickup!=null&&vy==0&&FeetSupported(.06f,out int floor)&&floor==-1&&!StandingOnPad()&&FirmBrickSupport()){
+   confirmedResources=pendingPickup;
+   pendingPickup=null;
+   if(checkpoint!=null){
+    CopyLandingLocation(checkpoint,confirmedResources);
+    checkpoint=confirmedResources;
+    WriteCheckpoint();
+   }
+  }
   int i=FixedLandingAt(pos);
   if(i<0){touchedLanding=-1;return;}
-  if(i==touchedLanding)return;
-  foreach(var pad in pads)
-   if(OnPadTop(pos,pad.center,pad.halfWidth))return;
+  if(i==touchedLanding||StandingOnPad())return;
   var center=fixedLandings[i].center;
-  if(Block(center,out _)||flyingSpikes.ThreatensLanding(center,Half,Body,reactionTime)||
-     (patrols!=null&&patrols.ThreatensLanding(center,Half,Body,reactionTime)))return;
-  if(decoy&&decoy.enabled&&decoyTriggered){
-   var area=decoy.bounds;
-   area.Expand(new Vector3(2.6f,1.5f,0));
-   if(area.Intersects(new Bounds(center+Vector2.up*(Body*.5f),new Vector3(Half*2,Body,0))))return;
-  }
+  if(checkpoint!=null&&checkpoint.feet==center){touchedLanding=i;return;}
+  if(!IsSafeLanding(center))return;
+  touchedLanding=i;
+  checkpoint=confirmedResources;
+  checkpoint.feet=center;
+  checkpoint.facingRight=hero.flipX;
+  checkpoint.hiddenBrickShown=hiddenBrickShown;
+  checkpoint.movedExit=exitRelocated;
+  checkpoint.flyingSpikes=flyingSpikes.CaptureRetryState();
+  checkpoint.patrolDistance=patrols?.Travelled??0;
+  WriteCheckpoint();
+ }
+ bool FirmBrickSupport(){
+  int ledge=FixedLandingAt(pos,true);
+  // Both sides of the soles must be over the same horizontal brick surface.
+  return ledge>=0&&FixedLandingAt(pos+Vector2.left*.12f,true)==ledge&&FixedLandingAt(pos+Vector2.right*.12f,true)==ledge;
+ }
+ static void CopyLandingLocation(LandingCheckpoint from,LandingCheckpoint to){
+  to.feet=from.feet;
+  to.facingRight=from.facingRight;
+  to.hiddenBrickShown=from.hiddenBrickShown;
+  to.movedExit=from.movedExit;
+  to.flyingSpikes=from.flyingSpikes;
+  to.patrolDistance=from.patrolDistance;
+ }
+ LandingCheckpoint CaptureResources(){
   var placed=new List<PlacedPlatformState>(pads.Count);
   foreach(var pad in pads)if(pad.view!=startingPad)
    placed.Add(new PlacedPlatformState{center=pad.center,type=pad.type,width=pad.halfWidth*2});
-  checkpoint=new LandingCheckpoint{
-   version=2,movedExit=exitRelocated,
-   feet=center,facingRight=hero.flipX,hiddenBrickShown=hiddenBrickShown,placedPlatforms=placed.ToArray(),
-   visibleOrbs=CaptureOrbs(),charge=charge,cooldown=cooldown,padTime=padTime,
+  return new LandingCheckpoint{
+   version=4,placedPlatforms=placed.ToArray(),visibleOrbs=CaptureOrbs(),charge=charge,cooldown=cooldown,padTime=padTime,
    startingPadEnabled=startingPad&&startingPad.enabled,startingPadColor=startingPad?startingPad.color:Color.white,
-   flyingSpikes=flyingSpikes.CaptureRetryState(),patrolDistance=patrols?.Travelled??0,
    decoyEnabled=decoy&&decoy.enabled,decoyArmed=decoyArmed,decoyTriggered=decoyTriggered,
    decoyAge=decoyAge,decoyPad=decoyPad,decoyPosition=decoy?decoy.transform.position:Vector3.zero,
    decoyScale=decoy?decoy.transform.localScale:Vector3.one,decoyColor=decoy?decoy.color:Color.white
   };
-  touchedLanding=i;
-  PlayerPrefs.SetString(LandingKeyPrefix+gameObject.scene.name,JsonUtility.ToJson(checkpoint));
-  PlayerPrefs.Save();
+ }
+ bool IsSafeLanding(Vector2 center){
+  const float reactionTime=.30f;
+  if(FixedLandingAt(center)<0||Block(center,out _)||flyingSpikes.ThreatensLanding(center,Half,Body,reactionTime)||
+     (patrols!=null&&patrols.ThreatensLanding(center,Half,Body,reactionTime)))return false;
+  if(!decoy||!decoy.enabled||!decoyTriggered)return true;
+  var area=decoy.bounds;
+  area.Expand(new Vector3(2.6f,1.5f,0));
+  return !area.Intersects(new Bounds(center+Vector2.up*(Body*.5f),new Vector3(Half*2,Body,0)));
  }
  void RestoreLanding(){
-  var saved=checkpoint;
-  if(saved==null){ResetRoom();return;}
+  if(checkpoint==null){ResetRoom();return;}
+  RestoreCheckpointWorld(checkpoint);
+  if(number==10&&checkpoint.movedExit&&!exitRelocated){
+   falseExitPosition=exit.transform.position;exitRelocated=true;exit.transform.position=RelocatedExitPosition;
+  }
+  ResetPlayer(RespawnFeet(checkpoint.feet),checkpoint.facingRight);
+ }
+ Vector2 RespawnFeet(Vector2 center){
+  if(!Block(center,out _))return center;
+  int index=FixedLandingAt(center,true);
+  if(index>=0){
+   var ledge=fixedLandings[index];
+   for(float dx=.1f;dx<ledge.halfWidth;dx+=.1f){
+    var left=center-Vector2.right*dx;
+    var right=center+Vector2.right*dx;
+    if(FixedLandingAt(left,true)==index&&!Block(left,out _))return left;
+    if(FixedLandingAt(right,true)==index&&!Block(right,out _))return right;
+   }
+  }
+  return spawn;
+ }
+ void RestoreCheckpointWorld(LandingCheckpoint saved){
   if(hiddenBrickShown!=saved.hiddenBrickShown){
    hiddenBrickShown=saved.hiddenBrickShown;
    SetHiddenBrick(hiddenBrickShown?hiddenBrickTile:null);
@@ -618,11 +717,11 @@ public class TideTrial : MonoBehaviour {
    decoy.color=saved.decoyColor;
    decoy.sprite=decoyTriggered?errorIcon:TideArt.Pic("Art/Orb");
   }
-  ResetPlayer(saved.feet,saved.facingRight);
  }
  const float HitPause=.065f,HitFade=.095f;
  void BeginRetry(bool outOfView){
   if(finished)return;
+  pendingPickup=null;
   CollectTouchedJournal();
   failures++;
   if(hintButton && failures>=Mathf.Max(1,failuresBeforeHint))TideGuideBook.Unlock(number);
@@ -805,7 +904,11 @@ public class TideTrial : MonoBehaviour {
   return;
  }
  airborne=vy!=0||!FeetSupported(.06f,out _);
- foreach(var orb in orbs)if(charge==0&&orb.gameObject.activeSelf&&Vector2.Distance(pos+Vector2.up*.65f,orb.transform.position)<1.05f){charge=1;orb.gameObject.SetActive(false);audioOut.PlayOneShot(pickup);}
+ foreach(var orb in orbs)if(charge==0&&orb.gameObject.activeSelf&&Vector2.Distance(pos+Vector2.up*.65f,orb.transform.position)<1.05f){
+  charge=1;orb.gameObject.SetActive(false);audioOut.PlayOneShot(pickup);
+  pendingPickup=CaptureResources();
+  break;
+ }
  RecordLanding();
  CollectTouchedJournal();
  if(OpenJournalWhenGrounded())return;
